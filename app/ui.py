@@ -1,8 +1,6 @@
-# app/ui.py
-
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from PIL import Image, ImageTk  # Cần PIL để hiển thị ảnh
+from PIL import Image, ImageTk 
 
 # Import các module đã tách riêng
 import app.processing as proc
@@ -22,6 +20,10 @@ class ImageEditorApp:
         # Các biến hiển thị của Tkinter
         self.original_photo = None
         self.processed_photo = None
+
+        # Biến điều khiển bộ lọc nâng cao (chỉ bật / tắt với thông số mặc định)
+        self.use_bilateral = tk.BooleanVar(value=False)
+        self.use_edge_preserving = tk.BooleanVar(value=False)
         
         self.create_widgets()
     
@@ -35,10 +37,6 @@ class ImageEditorApp:
                                 padx=20, pady=10, cursor='hand2')
         btn_choose.pack(side=tk.LEFT, padx=5)
         
-        # --- [ĐÃ XÓA] KHUNG TÙY CHỌN ---
-        # Toàn bộ "options_frame" (chứa Phương pháp, Đảo ngược màu, ...)
-        # đã được loại bỏ theo yêu cầu.
-        
         # CÁC NÚT BẤM CÒN LẠI
         btn_process = tk.Button(control_frame, text="Xử Lý Ảnh", command=self.process_image,
                                 bg='#2196F3', fg='white', font=('Arial', 12, 'bold'),
@@ -49,6 +47,11 @@ class ImageEditorApp:
                                 bg='#FF9800', fg='white', font=('Arial', 12, 'bold'),
                                 padx=20, pady=10, cursor='hand2')
         btn_save.pack(side=tk.LEFT, padx=5)
+
+        # Khung chứa các checkbox bộ lọc nâng cao
+        advanced_frame = tk.Frame(control_frame, bg='#f0f0f0')
+        advanced_frame.pack(side=tk.LEFT, padx=15)
+        self._build_filter_controls(advanced_frame)
         
         # KHUNG HIỂN THỊ ẢNH
         image_frame = tk.Frame(self.root)
@@ -68,6 +71,20 @@ class ImageEditorApp:
                                         font=('Arial', 14), fg='gray')
         self.processed_label.pack(fill=tk.BOTH, expand=True)
 
+    def _build_filter_controls(self, parent):
+        """Tạo giao diện gọn nhẹ cho bộ lọc nâng cao."""
+        ttk.Label(parent, text="Bộ lọc nâng cao").pack(anchor='w')
+        ttk.Checkbutton(
+            parent,
+            text="Bật Bilateral Filter ",   #mặc định: kernel 5px, sigmaC=0.1, sigmaS=1.5
+            variable=self.use_bilateral,
+        ).pack(anchor='w', pady=2)
+        ttk.Checkbutton(
+            parent,
+            text="Bật Edge-Preserving Filter ", #(10 vòng, κ=30, γ=0.2, option=1)
+            variable=self.use_edge_preserving,
+        ).pack(anchor='w', pady=2)
+
     def choose_image(self):
         """Hàm chọn ảnh, gọi hàm load từ utils.py"""
         image_path = filedialog.askopenfilename(
@@ -77,14 +94,6 @@ class ImageEditorApp:
         if not image_path:
             return
 
-        # --- BẮT ĐẦU CODE DEBUG ---
-        # (Giữ lại code debug của bạn)
-        print("--- DEBUG: BẮT ĐẦU KIỂM TRA 'app.utils' ---")
-        print(f"Python đang đọc file utils từ: {utils.__file__}")
-        print("Các hàm TÌM THẤY bên trong 'utils':")
-        print(dir(utils))
-        print("--- DEBUG: KẾT THÚC KIỂM TRA ---")
-        # --- KẾT THÚC CODE DEBUG ---
         
         # SỬ DỤNG HÀM TỪ UTILS
         self.original_rgb_image = utils.load_image_file(image_path)
@@ -112,30 +121,39 @@ class ImageEditorApp:
             return
         
         try:
-            # --- [ĐÃ XÓA] Không cần lấy giá trị từ UI nữa ---
-            # method = self.method_var.get()
-            # invert = self.invert_var.get()
-            # apply_bilateral_filter = self.bilateral_filter_var.get()
-            # apply_edge_preserving = self.edge_preserving_var.get()
+            
+            working_gray = self.gray_image
 
-            # --- GỌI CÁC HÀM TỪ PROCESSING (ĐÃ TỰ VIẾT) ---
+            # Áp dụng Bilateral Filter nếu checkbox được chọn
+            if self.use_bilateral.get():
+                working_gray = proc.bilateral_filter(
+                    working_gray,
+                    diameter=5,
+                    sigma_color=0.1,
+                    sigma_space=1.5,
+                )
+
+            # Áp dụng Edge-Preserving Filter nếu checkbox được chọn
+            if self.use_edge_preserving.get():
+                working_gray = proc.edge_preserving_filter(
+                    working_gray,
+                    num_iterations=10,
+                    kappa=30.0,
+                    gamma=0.2,
+                    option=1,
+                )
+
+            #  Làm mịn 
+            blurred_gray_image = proc.gaussian_blur(working_gray, size=5, sigma=1.0)
             
-            # 1. Làm mịn (Yêu cầu đề bài)
-            blurred_gray_image = proc.gaussian_blur(self.gray_image, size=5, sigma=1.0)
-            
-            # 2. Phát hiện biên (trên ảnh đã làm mịn)
-            # --- [ĐÃ SỬA] Chỉ dùng Sobel ---
+            # Phát hiện biên bằng Sobel 
             sketch = proc.sobel_edge_detection(blurred_gray_image)
 
-            # --- GỌI CÁC HÀM TỪ UTILS (Hiệu ứng) ---
+            # GỌI CÁC HÀM TỪ UTILS 
             sketch = utils.enhance_sketch_lines(sketch)
 
-            # --- [ĐÃ SỬA] Luôn luôn đảo ngược màu ---
+            # Đảo ngược màu
             sketch = utils.invert_sketch(sketch)
-
-            # --- [ĐÃ XÓA] Không dùng các bộ lọc nâng cao ---
-            # if apply_bilateral_filter: ...
-            # if apply_edge_preserving: ...
 
             self.processed_image = sketch
             
