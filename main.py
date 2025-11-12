@@ -1,8 +1,5 @@
-# main.py
-# (XÓA HẾT MỌI DÒNG sys.path.append ở đây)
-
 import tkinter as tk
-from app.ui import ImageEditorApp  # Dòng này sẽ chạy ĐÚNG BÂY GIỜ
+from app.ui import ImageEditorApp 
 import sys
 import os
 

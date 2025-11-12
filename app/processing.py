@@ -21,34 +21,22 @@ def convert_to_gray(rgb_image):
     return gray_image
 
 def convolution_2d(image, kernel):
-    """
-    Hàm TÍCH CHẬP (convolution) 2D cơ bản.
-    Đây là hàm CỐT LÕI thay thế cho mọi hàm filter() có sẵn.
-    """
     k_height, k_width = kernel.shape
     i_height, i_width = image.shape
     
-    # Tính toán padding (số pixel cần thêm vào viền)
     pad_h = k_height // 2
     pad_w = k_width // 2
     
-    # Tạo ảnh mới (toàn số 0) với padding ở viền
-    padded_image = np.zeros((i_height + 2 * pad_h, i_width + 2 * pad_w))
-    padded_image[pad_h:pad_h + i_height, pad_w:pad_w + i_width] = image
+    # SỬA: Ép kiểu padded_image sang float để tính toán chính xác
+    padded_image = np.pad(image.astype(float), ((pad_h, pad_h), (pad_w, pad_w)), mode='constant', constant_values=0)
     
-    # Tạo ảnh đầu ra (toàn số 0) với kích thước GỐC
-    output_image = np.zeros_like(image)
+    # SỬA: Output phải là float để chứa giá trị âm/dương tùy ý
+    output_image = np.zeros(image.shape, dtype=np.float64)
     
-    # Di chuyển kernel qua TỪNG pixel của ảnh GỐC
     for y in range(i_height):
         for x in range(i_width):
-            # Lấy vùng ảnh (Region of Interest) từ ảnh đã padding
             roi = padded_image[y : y + k_height, x : x + k_width]
-            
-            # Tính toán tích chập: nhân từng phần tử rồi tính tổng
             output_pixel = np.sum(roi * kernel)
-            
-            # Gán giá trị vào ảnh đầu ra
             output_image[y, x] = output_pixel
             
     return output_image
@@ -63,7 +51,6 @@ def _create_gaussian_kernel(size=5, sigma=1.0):
 def gaussian_blur(image, size=5, sigma=1.0):
     """
     Áp dụng bộ lọc Gaussian (làm mịn) bằng hàm tích chập.
-    Đây là "kỹ thuật làm mịn" mà đề bài yêu cầu.
     """
     kernel = _create_gaussian_kernel(size, sigma)
     return convolution_2d(image, kernel)
@@ -87,9 +74,11 @@ def sobel_edge_detection(gray_image):
     # 3. Tính độ lớn gradient: G = sqrt(Gx^2 + Gy^2)
     g_magnitude = np.hypot(g_x, g_y)
     
-    # 4. Chuẩn hóa kết quả về [0, 1]
-    if g_magnitude.max() > 0:
-        g_magnitude = g_magnitude / g_magnitude.max()
+
+    # 4. Chuẩn hóa kết quả về [0, 1] an toàn
+    max_val = g_magnitude.max()
+    if max_val > 0:
+        g_magnitude = g_magnitude / max_val
         
     return g_magnitude
 
@@ -103,10 +92,13 @@ def apply_laplacian_filter(gray_image):
                            [ 0,  1,  0]], dtype=np.float64)
     
     lap_image = convolution_2d(gray_image, lap_kernel)
-    
-    # Cộng ảnh gốc và ảnh sau khi áp dụng Laplacian
-    sketch = np.clip(gray_image + lap_image, 0, 1)
-    return sketch
+    # SỬA: Ép kiểu ảnh gốc sang float trước khi cộng
+    img_float = gray_image.astype(float)
+    sharpened = img_float - lap_image
+    if img_float.max() > 1.0:
+        return np.clip(sharpened, 0, 255).astype(np.uint8)
+    else:
+        return np.clip(sharpened, 0, 1)
 
 def log_edge_detection(gray_image, sigma=1.0):
     """
@@ -178,17 +170,29 @@ def edge_preserving_filter(image, num_iterations=10, kappa=30.0, gamma=0.2, opti
     if not (0 < gamma <= 0.25):
         raise ValueError("gamma must lie in (0, 0.25]")
     if num_iterations < 1:
-        raise ValueError("num_iterations must be >= 1")
+        raise ValueError("num_iterations must be >= 1")  
     image = image.astype(float)
+    
+    # Nếu ảnh đang ở hệ 255, đưa về 0-1 để thuật toán ổn định
+    is_255_scale = image.max() > 1.0
+    if is_255_scale:
+        image = image / 255.0
+        
     if image.ndim == 2:
-        return _anisotropic_diffusion(image, num_iterations, kappa, gamma, option)
-    if image.ndim == 3:
+        res = _anisotropic_diffusion(image, num_iterations, kappa, gamma, option)
+    elif image.ndim == 3:
         channels = [
             _anisotropic_diffusion(image[..., ch], num_iterations, kappa, gamma, option)
             for ch in range(image.shape[2])
         ]
-        return np.stack(channels, axis=-1)
-    raise ValueError("Edge preserving filter expects a 2D or 3D array")
+        res = np.stack(channels, axis=-1)
+    else:
+        raise ValueError("Invalid image dims")
+
+    # Nếu đầu vào là 255 thì trả về 255, ngược lại trả về 0-1
+    if is_255_scale:
+        return np.clip(res * 255, 0, 255).astype(np.uint8)
+    return res
 
 
 def _anisotropic_diffusion(channel, num_iterations, kappa, gamma, option):
